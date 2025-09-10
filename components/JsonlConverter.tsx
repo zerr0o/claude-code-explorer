@@ -9,6 +9,32 @@ import {
 } from 'lucide-react'
 import { cn, formatFileSize, formatFileDate, generateFileId } from '@/lib/utils'
 
+// TypeScript interfaces for JSONL message structures
+interface MessageContent {
+  type: 'text' | 'tool_use' | string
+  text?: string
+  name?: string
+  id?: string
+  input?: any
+  tool_use_id?: string
+  content?: any
+  [key: string]: any
+}
+
+interface Message {
+  type: 'user' | 'assistant' | 'summary'
+  message?: {
+    content: string | MessageContent[] | Record<string, any>
+    role?: string
+  }
+  created?: string
+  timestamp?: string
+  summary?: string
+  sessionId?: string
+  gitBranch?: string
+  cwd?: string
+}
+
 interface FileData {
   id: string
   name: string
@@ -192,17 +218,58 @@ export default function JsonlConverter() {
     }
   }
 
+  // Unified function to process message content regardless of format
+  const processMessageContent = (content: any, context: 'user' | 'assistant' = 'assistant'): string => {
+    let markdown = ''
+    
+    if (Array.isArray(content)) {
+      // Handle array content
+      content.forEach((item: any) => {
+        if (item?.type === 'text' && typeof item.text === 'string') {
+          markdown += item.text + '\n\n'
+        } else if (item?.type === 'tool_use') {
+          markdown += `**Tool Use:** ${item.name ?? '(unknown)'}\n`
+          if (item.id) markdown += `*Tool ID: ${item.id}*\n\n`
+          if (item.input !== undefined) {
+            markdown += '```json\n' + JSON.stringify(item.input, null, 2) + '\n```\n\n'
+          }
+        } else if (item?.tool_use_id && context === 'user') {
+          // Handle tool results in user messages
+          markdown += `**Tool Result** (${item.tool_use_id})\n\n`
+          if (item.content?.[0]?.text) {
+            markdown += '```\n' + item.content[0].text + '\n```\n\n'
+          }
+        } else if (typeof item === 'string') {
+          markdown += item + '\n\n'
+        } else if (item && typeof item === 'object') {
+          // Log unknown content types for debugging
+          if (item.type && !['text', 'tool_use'].includes(item.type)) {
+            console.warn(`Unknown content type '${item.type}' encountered in ${context} message:`, item)
+          }
+          markdown += '```json\n' + JSON.stringify(item, null, 2) + '\n```\n\n'
+        }
+      })
+    } else if (typeof content === 'string') {
+      markdown += content + '\n\n'
+    } else if (content && typeof content === 'object') {
+      console.warn(`Object content encountered in ${context} message:`, content)
+      markdown += '```json\n' + JSON.stringify(content, null, 2) + '\n```\n\n'
+    }
+    
+    return markdown
+  }
+
   const convertJsonlToMarkdown = (jsonlContent: string) => {
     try {
       const lines = jsonlContent.trim().split('\n')
-      const messages: any[] = []
+      const messages: Message[] = []
       
       lines.forEach((line, index) => {
         try {
-          const data = JSON.parse(line)
+          const data = JSON.parse(line) as Message
           messages.push(data)
         } catch (e) {
-          console.warn(`Skipping invalid JSON at line ${index + 1}`)
+          console.warn(`Skipping invalid JSON at line ${index + 1}:`, e)
         }
       })
 
@@ -227,14 +294,14 @@ export default function JsonlConverter() {
         if (msg.type === 'user') {
           let isModelCommand = false
           
-          if (msg.message?.content?.includes('<command-name>')) {
+          if (typeof msg.message?.content === 'string' && msg.message.content.includes('<command-name>')) {
             const commandMatch = msg.message.content.match(/<command-name>(.*?)<\/command-name>/)
             if (commandMatch && commandMatch[1] === '/model') {
               isModelCommand = true
             }
           }
           
-          if (isModelCommand && msg.message?.content?.includes('<local-command-stdout>')) {
+          if (isModelCommand && typeof msg.message?.content === 'string' && msg.message.content.includes('<local-command-stdout>')) {
             const stdoutMatch = msg.message.content.match(/<local-command-stdout>(.*?)<\/local-command-stdout>/s)
             if (stdoutMatch?.[1] && stdoutMatch[1] !== '(no content)') {
               let outputText = stdoutMatch[1]
@@ -251,7 +318,7 @@ export default function JsonlConverter() {
             if (timestamp) markdown += ` - ${timestamp}`
             markdown += '\n\n'
 
-            if (msg.message?.content?.includes('<command-name>')) {
+            if (typeof msg.message?.content === 'string' && msg.message.content.includes('<command-name>')) {
               const commandMatch = msg.message.content.match(/<command-name>(.*?)<\/command-name>/)
               const commandMessage = msg.message.content.match(/<command-message>(.*?)<\/command-message>/)
               
@@ -261,17 +328,12 @@ export default function JsonlConverter() {
                   markdown += `${commandMessage[1]}\n\n`
                 }
               }
-            } else if (msg.message?.content?.[0]?.tool_use_id) {
-              const toolResult = msg.message.content[0]
-              markdown += `**Tool Result** (${toolResult.tool_use_id})\n\n`
-              if (toolResult.content?.[0]?.text) {
-                markdown += '```\n' + toolResult.content[0].text + '\n```\n\n'
-              }
             } else if (msg.message?.content) {
-              markdown += `${msg.message.content}\n\n`
+              // Use unified processing for all user content
+              markdown += processMessageContent(msg.message.content, 'user')
             }
             
-            if (!isModelCommand && msg.message?.content?.includes('<local-command-stdout>')) {
+            if (!isModelCommand && typeof msg.message?.content === 'string' && msg.message.content.includes('<local-command-stdout>')) {
               const stdoutMatch = msg.message.content.match(/<local-command-stdout>(.*?)<\/local-command-stdout>/s)
               if (stdoutMatch?.[1] && stdoutMatch[1] !== '(no content)') {
                 markdown += `**Output:**\n\`\`\`\n${stdoutMatch[1]}\n\`\`\`\n\n`
@@ -285,18 +347,9 @@ export default function JsonlConverter() {
           if (timestamp) markdown += ` - ${timestamp}`
           markdown += '\n\n'
 
+          // Use unified processing for all assistant content
           if (msg.message.content) {
-            msg.message.content.forEach((content: any) => {
-              if (content.type === 'text') {
-                markdown += `${content.text}\n\n`
-              } else if (content.type === 'tool_use') {
-                markdown += `**Tool Use:** ${content.name}\n`
-                markdown += `*Tool ID: ${content.id}*\n\n`
-                if (content.input) {
-                  markdown += '```json\n' + JSON.stringify(content.input, null, 2) + '\n```\n\n'
-                }
-              }
-            })
+            markdown += processMessageContent(msg.message.content, 'assistant')
           }
         }
 
