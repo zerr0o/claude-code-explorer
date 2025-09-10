@@ -7,7 +7,11 @@ import {
   FolderOpen, Trash2, FileCheck, AlertCircle, Edit2,
   ArrowUpDown, Calendar, Type, HardDrive, Check
 } from 'lucide-react'
-import { cn, formatFileSize, formatFileDate, generateFileId } from '@/lib/utils'
+import { 
+  cn, formatFileSize, formatFileDate, generateFileId,
+  decodeJsonString, normalizeToMarkdown, extractHeredocContent,
+  formatToolInput, formatMarkdownContent
+} from '@/lib/utils'
 
 // TypeScript interfaces for JSONL message structures
 interface MessageContent {
@@ -222,25 +226,39 @@ export default function JsonlConverter() {
   const processMessageContent = (content: any, context: 'user' | 'assistant' = 'assistant'): string => {
     let markdown = ''
     
-    if (Array.isArray(content)) {
+    // First, try to decode the content if it's a JSON-escaped string
+    const decodedContent = decodeJsonString(content)
+    
+    if (Array.isArray(decodedContent)) {
       // Handle array content
-      content.forEach((item: any) => {
+      decodedContent.forEach((item: any) => {
         if (item?.type === 'text' && typeof item.text === 'string') {
-          markdown += item.text + '\n\n'
+          // Decode and format the text content
+          const decodedText = decodeJsonString(item.text) as string
+          markdown += formatMarkdownContent(decodedText) + '\n\n'
         } else if (item?.type === 'tool_use') {
-          markdown += `**Tool Use:** ${item.name ?? '(unknown)'}\n`
+          markdown += `### 🛠 Tool Use: ${item.name ?? '(unknown)'}\n`
           if (item.id) markdown += `*Tool ID: ${item.id}*\n\n`
           if (item.input !== undefined) {
-            markdown += '```json\n' + JSON.stringify(item.input, null, 2) + '\n```\n\n'
+            // Use the new formatToolInput function for better formatting
+            const formattedInput = formatToolInput(item.input, item.name)
+            markdown += formattedInput + '\n\n'
           }
         } else if (item?.tool_use_id && context === 'user') {
           // Handle tool results in user messages
-          markdown += `**Tool Result** (${item.tool_use_id})\n\n`
+          markdown += `#### 📊 Tool Result (${item.tool_use_id})\n\n`
           if (item.content?.[0]?.text) {
-            markdown += '```\n' + item.content[0].text + '\n```\n\n'
+            const decodedResult = decodeJsonString(item.content[0].text) as string
+            // Check if result looks like structured output or plain text
+            if (decodedResult.includes('\n') || decodedResult.length > 100) {
+              markdown += '```\n' + decodedResult + '\n```\n\n'
+            } else {
+              markdown += decodedResult + '\n\n'
+            }
           }
         } else if (typeof item === 'string') {
-          markdown += item + '\n\n'
+          const decodedItem = decodeJsonString(item) as string
+          markdown += formatMarkdownContent(decodedItem) + '\n\n'
         } else if (item && typeof item === 'object') {
           // Log unknown content types for debugging
           if (item.type && !['text', 'tool_use'].includes(item.type)) {
@@ -249,11 +267,11 @@ export default function JsonlConverter() {
           markdown += '```json\n' + JSON.stringify(item, null, 2) + '\n```\n\n'
         }
       })
-    } else if (typeof content === 'string') {
-      markdown += content + '\n\n'
-    } else if (content && typeof content === 'object') {
-      console.warn(`Object content encountered in ${context} message:`, content)
-      markdown += '```json\n' + JSON.stringify(content, null, 2) + '\n```\n\n'
+    } else if (typeof decodedContent === 'string') {
+      markdown += formatMarkdownContent(decodedContent) + '\n\n'
+    } else if (decodedContent && typeof decodedContent === 'object') {
+      console.warn(`Object content encountered in ${context} message:`, decodedContent)
+      markdown += '```json\n' + JSON.stringify(decodedContent, null, 2) + '\n```\n\n'
     }
     
     return markdown
@@ -329,14 +347,26 @@ export default function JsonlConverter() {
                 }
               }
             } else if (msg.message?.content) {
-              // Use unified processing for all user content
-              markdown += processMessageContent(msg.message.content, 'user')
+              // Check if content contains a command with heredoc
+              if (typeof msg.message.content === 'string' && msg.message.content.includes('$(cat <<')) {
+                const { command, heredocContent } = extractHeredocContent(msg.message.content)
+                if (heredocContent) {
+                  markdown += `**Command:** \`${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\`\n\n`
+                  markdown += `**Content:**\n\n${heredocContent}\n\n`
+                } else {
+                  markdown += processMessageContent(msg.message.content, 'user')
+                }
+              } else {
+                // Use unified processing for all user content
+                markdown += processMessageContent(msg.message.content, 'user')
+              }
             }
             
             if (!isModelCommand && typeof msg.message?.content === 'string' && msg.message.content.includes('<local-command-stdout>')) {
               const stdoutMatch = msg.message.content.match(/<local-command-stdout>(.*?)<\/local-command-stdout>/s)
               if (stdoutMatch?.[1] && stdoutMatch[1] !== '(no content)') {
-                markdown += `**Output:**\n\`\`\`\n${stdoutMatch[1]}\n\`\`\`\n\n`
+                const decodedOutput = decodeJsonString(stdoutMatch[1]) as string
+                markdown += `**Output:**\n\`\`\`\n${decodedOutput}\n\`\`\`\n\n`
               }
             }
           }
