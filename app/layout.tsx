@@ -3,15 +3,15 @@ import { Analytics } from '@vercel/analytics/react'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'JSONL Browser | Linda\'s Dev Tools',
-  description: 'Convert JSONL files to Markdown with multi-file support, search, and Everforest theme',
-  keywords: 'JSONL, Markdown, converter, browser, developer tools',
+  title: 'Claude Code Explorer | Linda\'s Dev Tools',
+  description: 'Browse Claude Code conversations, search tool uses, and explore your AI-assisted development history',
+  keywords: 'Claude Code, conversation browser, tool use explorer, developer tools',
   authors: [{ name: 'Linda' }],
   openGraph: {
-    title: 'JSONL Browser',
-    description: 'Convert JSONL files to Markdown with ease',
+    title: 'Claude Code Explorer',
+    description: 'Browse and search your Claude Code conversations and tool uses',
     url: 'https://jsonlbrowser.withlinda.dev',
-    siteName: 'JSONL Browser',
+    siteName: 'Claude Code Explorer',
     type: 'website',
   },
 }

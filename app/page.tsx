@@ -1,9 +1,9 @@
-import JsonlConverter from '@/components/JsonlConverter'
+import ConversationBrowser from '@/components/ConversationBrowser'
 
 export default function Home() {
   return (
     <main className="h-screen overflow-hidden">
-      <JsonlConverter />
+      <ConversationBrowser />
     </main>
   )
 }
