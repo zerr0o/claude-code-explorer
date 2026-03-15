@@ -2,7 +2,7 @@
 
 A powerful local web app to browse, search, and analyze your Claude Code CLI conversation history. Point it to your `~/.claude/projects/` directory and instantly explore all your conversations, tool uses, and development sessions.
 
-![Claude Code CLI JSONL Viewer](Readme-images/Claude-Code-CLI-JSONL-viewer-converter-to-Markdown.png)
+![Claude Code CLI JSONL Viewer](https://i.imgur.com/nYstVEb.png)
 
 ## Features
 
